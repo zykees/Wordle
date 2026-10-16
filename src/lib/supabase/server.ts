@@ -18,5 +18,9 @@ export function getSupabaseServerClient() {
     auth: {
       persistSession: false,
     },
+    realtime: {
+      // Prevents Node 20 exception in serverless functions where realtime websocket is not needed
+      transport: class DummyWS {} as unknown as typeof WebSocket,
+    },
   });
 }

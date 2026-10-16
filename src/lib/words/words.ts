@@ -355,12 +355,13 @@ export function isValidWord(word: string, length: number): boolean {
   const clean = word.trim().toUpperCase();
   if (clean.length !== length) return false;
   
-  // Check our curated word list
+  // Strictly check against the English dictionary
   const set = WORD_SETS[length];
-  if (set && set.has(clean)) return true;
+  if (set && set.has(clean)) {
+    return true;
+  }
   
-  // If not found in primary list, check alphabetical integrity
-  return /^[A-Z]+$/.test(clean);
+  return false;
 }
 
 export function getRandomWord(length: number): string {

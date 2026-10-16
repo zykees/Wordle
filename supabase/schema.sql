@@ -225,7 +225,18 @@ CREATE POLICY "Users can view their H2H stats"
   USING (auth.uid() = player_a OR auth.uid() = player_b);
 
 
--- 8. SUPABASE REALTIME CONFIGURATION
+-- 8. GRANT PRIVILEGES TO ANON AND AUTHENTICATED ROLES
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
+
+
+-- 9. SUPABASE REALTIME CONFIGURATION
 -- Publish changes so players receive live moves without page refreshes
 BEGIN;
   DROP PUBLICATION IF EXISTS supabase_realtime;

@@ -2,11 +2,16 @@ import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { memoryStore } from '@/lib/memoryStore';
 
+function isValidUUID(val: unknown): boolean {
+  return typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const code = body.code?.toUpperCase().trim();
-    const guestId = body.guestId || null;
+    const rawGuestId = body.guestId || null;
+    const guestId = isValidUUID(rawGuestId) ? rawGuestId : null;
     const guestName = body.guestName?.trim() || 'Guest';
 
     if (!code) {
@@ -19,12 +24,11 @@ export async function POST(req: Request) {
       const { data: lobby, error: fetchErr } = await supabase
         .from('lobbies')
         .select('*')
-        .eq('code', code)
-        .single();
+        .ilike('code', code)
+        .maybeSingle();
 
       if (!fetchErr && lobby) {
-        if (lobby.guest_id && lobby.guest_id !== guestId) {
-          // If already full
+        if (lobby.guest_id && guestId && lobby.guest_id !== guestId) {
           return NextResponse.json({ error: 'Lobby is already full' }, { status: 400 });
         }
 
@@ -42,6 +46,7 @@ export async function POST(req: Request) {
           .single();
 
         if (!updateErr && updated) {
+          memoryStore.saveLobby(updated);
           return NextResponse.json({ success: true, lobby: updated });
         }
       }

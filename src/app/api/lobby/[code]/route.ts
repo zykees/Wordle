@@ -20,10 +20,12 @@ export async function GET(
       const { data: lobby, error } = await supabase
         .from('lobbies')
         .select('*')
-        .eq('code', cleanCode)
-        .single();
+        .ilike('code', cleanCode)
+        .maybeSingle();
 
       if (!error && lobby) {
+        memoryStore.saveLobby(lobby);
+
         const { data: guesses } = await supabase
           .from('lobby_guesses')
           .select('*')
@@ -40,6 +42,9 @@ export async function GET(
           lobby: sanitizedLobby,
           guesses: guesses || [],
         });
+      }
+      if (error) {
+        console.warn('Supabase fetch lobby error:', error.message);
       }
     }
 

@@ -5,6 +5,10 @@ import { evaluateGuess } from '@/lib/game/engine';
 import { isValidWord } from '@/lib/words/words';
 import { LobbyGuess } from '@/lib/supabase/types';
 
+function isValidUUID(val: unknown): boolean {
+  return typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -12,6 +16,7 @@ export async function POST(req: Request) {
 
     const cleanCode = code?.toUpperCase().trim();
     const cleanGuess = guess?.toUpperCase().trim();
+    const cleanPlayerId = isValidUUID(playerId) ? playerId : null;
 
     if (!cleanCode || !role || !cleanGuess) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -25,10 +30,13 @@ export async function POST(req: Request) {
       const { data, error } = await supabase
         .from('lobbies')
         .select('*')
-        .eq('code', cleanCode)
-        .single();
+        .ilike('code', cleanCode)
+        .maybeSingle();
+
       if (!error && data) {
         lobby = data;
+        memoryStore.saveLobby(lobby);
+
         const { data: gList } = await supabase
           .from('lobby_guesses')
           .select('*')
@@ -104,7 +112,7 @@ export async function POST(req: Request) {
       id: crypto.randomUUID(),
       lobby_id: lobby.id,
       player_role: role,
-      player_id: playerId || null,
+      player_id: cleanPlayerId,
       player_name: playerName,
       guess_word: cleanGuess,
       guess_number: guessNumber,
