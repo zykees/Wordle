@@ -19,6 +19,10 @@ class MemoryStore {
     return this.guesses.get(lobbyId) || [];
   }
 
+  clearGuesses(lobbyId: string): void {
+    this.guesses.delete(lobbyId);
+  }
+
   addGuess(guess: LobbyGuess): LobbyGuess {
     const list = this.guesses.get(guess.lobby_id) || [];
     list.push(guess);

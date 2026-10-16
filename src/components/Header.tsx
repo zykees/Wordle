@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Volume2, VolumeX, Swords, Users, User, LogIn, LogOut, Edit2, Check, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Swords, Users, User, LogOut, Edit2, Check, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { soundManager } from '@/lib/game/engine';
 
 interface HeaderProps {
   mode: 'solo' | 'multiplayer';
   wordLength: number;
+  maxAttempts: number;
   onSelectWordLength: (length: number) => void;
+  onSelectMaxAttempts: (attempts: number) => void;
   onOpenLobbyModal: () => void;
   onOpenH2HModal: () => void;
   onSwitchToSolo: () => void;
@@ -17,7 +19,9 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   mode,
   wordLength,
+  maxAttempts,
   onSelectWordLength,
+  onSelectMaxAttempts,
   onOpenLobbyModal,
   onOpenH2HModal,
   onSwitchToSolo,
@@ -132,35 +136,61 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Sub-bar: Word Length selector (4 - 10 letters) & User Tag */}
-      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/40 text-xs">
+      {/* Sub-bar: Word Length & Attempts selectors & User Tag */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/40 text-xs">
         {mode === 'solo' ? (
-          <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto py-0.5 no-scrollbar">
-            <span className="text-slate-500 font-semibold text-[11px] uppercase mr-1">Length:</span>
-            {[4, 5, 6, 7, 8, 9, 10].map((len) => (
-              <button
-                key={len}
-                onClick={() => onSelectWordLength(len)}
-                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg font-bold text-xs transition ${
-                  wordLength === len
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                }`}
-              >
-                {len}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Length selector */}
+            <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto py-0.5 no-scrollbar">
+              <span className="text-slate-500 font-semibold text-[11px] uppercase mr-1">Length:</span>
+              {[4, 5, 6, 7, 8, 9, 10].map((len) => (
+                <button
+                  key={len}
+                  onClick={() => onSelectWordLength(len)}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg font-bold text-xs transition ${
+                    wordLength === len
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  }`}
+                >
+                  {len}
+                </button>
+              ))}
+            </div>
+
+            {/* Attempts selector */}
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="text-slate-500 font-semibold text-[11px] uppercase mr-1">Attempts:</span>
+              {[4, 5, 6, 7, 8].map((att) => (
+                <button
+                  key={att}
+                  onClick={() => onSelectMaxAttempts(att)}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg font-bold text-xs transition ${
+                    maxAttempts === att
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  }`}
+                >
+                  {att}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 text-indigo-400 font-semibold">
+          <div className="flex items-center gap-2 text-indigo-400 font-semibold">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Duel Mode • {wordLength} Letters</span>
+            <span className="px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/60 text-xs text-indigo-300">
+              {wordLength} Letters
+            </span>
+            <span className="px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/60 text-xs text-indigo-300">
+              {maxAttempts} Attempts
+            </span>
           </div>
         )}
 
         {/* Guest edit name inline */}
         {user.isGuest && (
-          <div className="flex items-center gap-1.5 text-slate-400 shrink-0">
+          <div className="flex items-center gap-1.5 text-slate-400 shrink-0 ml-auto">
             {isEditingName ? (
               <div className="flex items-center gap-1">
                 <input

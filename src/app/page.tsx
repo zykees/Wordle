@@ -9,11 +9,11 @@ import { LobbyModal } from '@/components/LobbyModal';
 import { H2HModal } from '@/components/H2HModal';
 import { GameOverModal } from '@/components/GameOverModal';
 import { useAuth } from '@/context/AuthContext';
-import { evaluateGuess, getKeyStates, soundManager, EvaluatedRow } from '@/lib/game/engine';
+import { evaluateGuess, getKeyStates, soundManager, EvaluatedRow, TileState } from '@/lib/game/engine';
 import { getRandomWord, isValidWord } from '@/lib/words/words';
 import { Lobby, LobbyGuess } from '@/lib/supabase/types';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
-import { Users, Copy, Check, Play, RefreshCw, AlertCircle } from 'lucide-react';
+import { Copy, Check, Play, RefreshCw, AlertCircle } from 'lucide-react';
 
 export default function WordlePage() {
   const { user } = useAuth();
@@ -46,6 +46,8 @@ export default function WordlePage() {
   const [isGameOverModalOpen, setIsGameOverModalOpen] = useState<boolean>(false);
 
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentRoundRef = useRef<number>(1);
+  const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const showToast = useCallback((msg: string, duration = 1800) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -56,7 +58,7 @@ export default function WordlePage() {
   }, []);
 
   // Initialize or Reset Solo Game
-  const startNewSoloGame = useCallback((len = wordLength) => {
+  const startNewSoloGame = useCallback((len = wordLength, att = maxAttempts) => {
     const newWord = getRandomWord(len);
     setTargetWord(newWord);
     setCurrentGuess('');
@@ -66,14 +68,14 @@ export default function WordlePage() {
     setIsDraw(false);
     setWinnerName(null);
     setIsGameOverModalOpen(false);
-  }, [wordLength]);
+  }, [wordLength, maxAttempts]);
 
   // Initial Solo Game setup
   useEffect(() => {
     if (mode === 'solo' && !targetWord) {
-      startNewSoloGame(wordLength);
+      startNewSoloGame(wordLength, maxAttempts);
     }
-  }, [mode, wordLength, targetWord, startNewSoloGame]);
+  }, [mode, wordLength, maxAttempts, targetWord, startNewSoloGame]);
 
   // URL Invite Code auto-detection: check if ?room=CODE
   useEffect(() => {
@@ -169,6 +171,15 @@ export default function WordlePage() {
         return;
       }
 
+      // Broadcast move instantly via Realtime websocket if active
+      if (realtimeChannelRef.current) {
+        realtimeChannelRef.current.send({
+          type: 'broadcast',
+          event: 'guess_made',
+          payload: { role: playerRole, count: guesses.length + 1 },
+        });
+      }
+
       // Flip sounds
       for (let i = 0; i < lobby.word_length; i++) {
         setTimeout(() => soundManager.playFlip(i), i * 100);
@@ -246,13 +257,13 @@ export default function WordlePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   });
 
-  // Multiplayer Room State Sync & Realtime Subscription
+  // Multiplayer Room State Sync & Fast Realtime Polling
   useEffect(() => {
     if (mode !== 'multiplayer' || !lobby) return;
 
     let isSubscribed = true;
 
-    // Polling function for state sync
+    // Fast polling function for state sync (600ms)
     const fetchLobbyUpdate = async () => {
       try {
         const res = await fetch(`/api/lobby/${lobby.code}`);
@@ -261,7 +272,38 @@ export default function WordlePage() {
         if (!isSubscribed) return;
 
         if (data.lobby) {
-          setLobby(data.lobby);
+          // Check if round number changed (Rematch triggered!)
+          if (data.lobby.round_number !== currentRoundRef.current) {
+            currentRoundRef.current = data.lobby.round_number;
+            setLobby(data.lobby);
+            setGuesses([]);
+            setCurrentGuess('');
+            setOpponentGuesses([]);
+            setIsGameOver(false);
+            setIsWinner(false);
+            setIsDraw(false);
+            setWinnerName(null);
+            setIsGameOverModalOpen(false);
+            setTargetWord(data.lobby.target_word);
+            showToast(`Round ${data.lobby.round_number} Started!`);
+            return;
+          }
+
+          // If rematch set status back to in_progress while local is marked finished
+          if (data.lobby.status === 'in_progress' && isGameOver) {
+            setLobby(data.lobby);
+            setGuesses([]);
+            setCurrentGuess('');
+            setOpponentGuesses([]);
+            setIsGameOver(false);
+            setIsWinner(false);
+            setIsDraw(false);
+            setWinnerName(null);
+            setIsGameOverModalOpen(false);
+          } else {
+            setLobby(data.lobby);
+          }
+
           if (data.lobby.status === 'finished') {
             setIsGameOver(true);
             if (data.lobby.winner_role === playerRole) {
@@ -283,6 +325,17 @@ export default function WordlePage() {
           const opponentRole = playerRole === 'host' ? 'guest' : 'host';
           const oppList = (data.guesses as LobbyGuess[]).filter((g) => g.player_role === opponentRole);
           setOpponentGuesses(oppList);
+
+          // If local guesses is empty and remote has guesses (e.g. reload), restore them
+          const myGuesses = (data.guesses as LobbyGuess[]).filter((g) => g.player_role === playerRole);
+          if (myGuesses.length > 0 && guesses.length === 0 && !isGameOver) {
+            setGuesses(
+              myGuesses.map((g) => ({
+                word: g.guess_word,
+                states: g.tile_states as TileState[],
+              }))
+            );
+          }
         }
       } catch (err) {
         console.error('Lobby poll error:', err);
@@ -292,31 +345,39 @@ export default function WordlePage() {
     // Immediate initial sync
     fetchLobbyUpdate();
 
-    // 1.5s interval polling
-    const intervalId = setInterval(fetchLobbyUpdate, 1500);
+    // 600ms fast polling for snappy real-time experience
+    const intervalId = setInterval(fetchLobbyUpdate, 600);
 
     // Supabase Realtime channel subscription if configured
     let channel: ReturnType<typeof supabase.channel> | null = null;
     if (isSupabaseConfigured && supabase) {
       channel = supabase
-        .channel(`lobby_${lobby.id}`)
+        .channel(`lobby_${lobby.id}`, {
+          config: { broadcast: { self: false } },
+        })
+        .on('broadcast', { event: 'guess_made' }, () => {
+          fetchLobbyUpdate();
+        })
+        .on('broadcast', { event: 'rematch_started' }, () => {
+          fetchLobbyUpdate();
+        })
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'lobbies', filter: `id=eq.${lobby.id}` },
-          (payload) => {
-            if (payload.new) {
-              setLobby(payload.new as Lobby);
-            }
+          () => {
+            fetchLobbyUpdate();
           }
         )
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'lobby_guesses', filter: `lobby_id=eq.${lobby.id}` },
+          { event: '*', schema: 'public', table: 'lobby_guesses', filter: `lobby_id=eq.${lobby.id}` },
           () => {
             fetchLobbyUpdate();
           }
         )
         .subscribe();
+
+      realtimeChannelRef.current = channel;
     }
 
     return () => {
@@ -324,9 +385,10 @@ export default function WordlePage() {
       clearInterval(intervalId);
       if (channel && supabase) {
         supabase.removeChannel(channel);
+        realtimeChannelRef.current = null;
       }
     };
-  }, [mode, lobby?.id, lobby?.code, playerRole]);
+  }, [mode, lobby?.id, lobby?.code, playerRole, guesses.length, isGameOver, showToast]);
 
   // Handle Rematch in Multiplayer
   const handleRematch = async () => {
@@ -343,6 +405,16 @@ export default function WordlePage() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        // Send instant broadcast to opponent
+        if (realtimeChannelRef.current) {
+          realtimeChannelRef.current.send({
+            type: 'broadcast',
+            event: 'rematch_started',
+            payload: { round: data.lobby.round_number },
+          });
+        }
+
+        currentRoundRef.current = data.lobby.round_number;
         setLobby(data.lobby);
         setGuesses([]);
         setCurrentGuess('');
@@ -351,7 +423,9 @@ export default function WordlePage() {
         setIsWinner(false);
         setIsDraw(false);
         setWinnerName(null);
-        showToast('New round started!');
+        setIsGameOverModalOpen(false);
+        setTargetWord(data.lobby.target_word);
+        showToast(`Round ${data.lobby.round_number} Started!`);
       }
     } catch {
       showToast('Failed to start rematch');
@@ -361,13 +435,20 @@ export default function WordlePage() {
   // Switch Word Length in Solo mode
   const handleSelectWordLength = (len: number) => {
     setWordLength(len);
-    startNewSoloGame(len);
+    startNewSoloGame(len, maxAttempts);
+  };
+
+  // Switch Max Attempts in Solo mode
+  const handleSelectMaxAttempts = (att: number) => {
+    setMaxAttempts(att);
+    startNewSoloGame(wordLength, att);
   };
 
   const handleLobbyJoined = (joinedLobby: Lobby, role: 'host' | 'guest') => {
     setMode('multiplayer');
     setLobby(joinedLobby);
     setPlayerRole(role);
+    currentRoundRef.current = joinedLobby.round_number || 1;
     setWordLength(joinedLobby.word_length);
     setMaxAttempts(joinedLobby.max_attempts);
     setGuesses([]);
@@ -377,12 +458,13 @@ export default function WordlePage() {
     setIsWinner(false);
     setIsDraw(false);
     setWinnerName(null);
+    setIsGameOverModalOpen(false);
   };
 
   const handleSwitchToSolo = () => {
     setMode('solo');
     setLobby(null);
-    startNewSoloGame(wordLength);
+    startNewSoloGame(wordLength, maxAttempts);
   };
 
   const copyRoomCode = () => {
@@ -411,7 +493,9 @@ export default function WordlePage() {
       <Header
         mode={mode}
         wordLength={mode === 'solo' ? wordLength : lobby?.word_length || wordLength}
+        maxAttempts={mode === 'solo' ? maxAttempts : lobby?.max_attempts || maxAttempts}
         onSelectWordLength={handleSelectWordLength}
+        onSelectMaxAttempts={handleSelectMaxAttempts}
         onOpenLobbyModal={() => setIsLobbyModalOpen(true)}
         onOpenH2HModal={() => setIsH2HModalOpen(true)}
         onSwitchToSolo={handleSwitchToSolo}
@@ -435,7 +519,9 @@ export default function WordlePage() {
             </div>
 
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400">Round {lobby.round_number || 1}</span>
+              <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60 font-semibold">
+                Round {lobby.round_number || 1}
+              </span>
               <span className="text-slate-600">•</span>
               {lobby.status === 'waiting' ? (
                 <span className="text-amber-400 flex items-center gap-1 font-medium animate-pulse">
@@ -453,7 +539,7 @@ export default function WordlePage() {
         )}
 
         {/* Boards Section */}
-        <div className={`w-full flex flex-col lg:flex-row items-center justify-center gap-6 sm:gap-8 my-auto`}>
+        <div className="w-full flex flex-col lg:flex-row items-center justify-center gap-6 sm:gap-8 my-auto">
           {/* Player Board */}
           <div className="flex flex-col items-center">
             {mode === 'multiplayer' && (
@@ -500,9 +586,9 @@ export default function WordlePage() {
             isGameOver && (
               <button
                 onClick={handleRematch}
-                className="py-1.5 px-4 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-md transition flex items-center gap-1.5"
+                className="py-1.5 px-4 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-md transition flex items-center gap-1.5 animate-bounce"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Next Round
+                <RefreshCw className="w-3.5 h-3.5" /> Next Round / Rematch
               </button>
             )
           )}

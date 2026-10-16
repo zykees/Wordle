@@ -225,8 +225,8 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
                   <label className="block text-xs font-semibold text-slate-300 mb-2">
                     Max Attempts
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[5, 6, 7].map((att) => (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[4, 5, 6, 7, 8].map((att) => (
                       <button
                         key={att}
                         type="button"
@@ -237,7 +237,7 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
                             : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
                         }`}
                       >
-                        {att} Guesses
+                        {att}
                       </button>
                     ))}
                   </div>

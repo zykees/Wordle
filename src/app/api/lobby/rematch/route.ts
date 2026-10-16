@@ -55,6 +55,7 @@ export async function POST(req: Request) {
     }
 
     // Fallback store
+    memoryStore.clearGuesses(lobby.id);
     lobby.target_word = newTargetWord;
     lobby.round_number = newRound;
     lobby.status = 'in_progress';
