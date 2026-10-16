@@ -26,11 +26,26 @@ export async function GET(
       if (!error && lobby) {
         memoryStore.saveLobby(lobby);
 
-        const { data: guesses } = await supabase
+        const { data: allGuesses } = await supabase
           .from('lobby_guesses')
           .select('*')
           .eq('lobby_id', lobby.id)
           .order('created_at', { ascending: true });
+
+        // Filter guesses strictly for the current round:
+        // 1. By round_number if present
+        // 2. Or by creation timestamp against current round start (updated_at)
+        const currentRoundNumber = Number(lobby.round_number) || 1;
+        const roundStartMs = lobby.updated_at ? new Date(lobby.updated_at).getTime() - 2500 : 0;
+        const guesses = (allGuesses || []).filter((g: any) => {
+          if (typeof g.round_number === 'number' && g.round_number > 0) {
+            return g.round_number === currentRoundNumber;
+          }
+          if (g.created_at && roundStartMs > 0) {
+            return new Date(g.created_at).getTime() >= roundStartMs;
+          }
+          return true;
+        });
 
         // Hide target_word if game is still in progress or waiting
         const sanitizedLobby = {
@@ -54,7 +69,19 @@ export async function GET(
       return NextResponse.json({ error: 'Lobby not found' }, { status: 404 });
     }
 
-    const guesses = memoryStore.getGuesses(lobby.id);
+    const allMemoryGuesses = memoryStore.getGuesses(lobby.id);
+    const currentRoundNumber = Number(lobby.round_number) || 1;
+    const roundStartMs = lobby.updated_at ? new Date(lobby.updated_at).getTime() - 2500 : 0;
+    const guesses = allMemoryGuesses.filter((g: any) => {
+      if (typeof g.round_number === 'number' && g.round_number > 0) {
+        return g.round_number === currentRoundNumber;
+      }
+      if (g.created_at && roundStartMs > 0) {
+        return new Date(g.created_at).getTime() >= roundStartMs;
+      }
+      return true;
+    });
+
     const sanitizedLobby = {
       ...lobby,
       target_word: lobby.status === 'finished' ? lobby.target_word : '******'

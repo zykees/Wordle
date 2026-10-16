@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS public.lobby_guesses (
   guess_number INT NOT NULL,
   tile_states JSONB NOT NULL, -- e.g. ["correct", "present", "absent", ...]
   is_correct BOOLEAN NOT NULL DEFAULT FALSE,
+  round_number INT NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -207,12 +208,16 @@ CREATE POLICY "Anyone can create lobbies"
   ON public.lobbies FOR INSERT WITH CHECK (true);
 CREATE POLICY "Anyone can update lobbies" 
   ON public.lobbies FOR UPDATE USING (true);
+CREATE POLICY "Anyone can delete lobbies" 
+  ON public.lobbies FOR DELETE USING (true);
 
 -- Lobby Guesses: Accessible to all
 CREATE POLICY "Anyone can view lobby guesses" 
   ON public.lobby_guesses FOR SELECT USING (true);
 CREATE POLICY "Anyone can insert lobby guesses" 
   ON public.lobby_guesses FOR INSERT WITH CHECK (true);
+CREATE POLICY "Anyone can delete lobby guesses" 
+  ON public.lobby_guesses FOR DELETE USING (true);
 
 -- Matches: Authenticated users can view their own matches
 CREATE POLICY "Users can view matches they participated in" 

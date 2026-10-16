@@ -40,15 +40,37 @@ export async function POST(req: Request) {
         const { data: gList } = await supabase
           .from('lobby_guesses')
           .select('*')
-          .eq('lobby_id', lobby.id);
-        existingGuesses = gList || [];
+          .eq('lobby_id', lobby.id)
+          .order('created_at', { ascending: true });
+
+        const currentRoundNumber = Number(lobby.round_number) || 1;
+        const roundStartMs = lobby.updated_at ? new Date(lobby.updated_at).getTime() - 2500 : 0;
+        existingGuesses = (gList || []).filter((g: any) => {
+          if (typeof g.round_number === 'number' && g.round_number > 0) {
+            return g.round_number === currentRoundNumber;
+          }
+          if (g.created_at && roundStartMs > 0) {
+            return new Date(g.created_at).getTime() >= roundStartMs;
+          }
+          return true;
+        });
       }
     }
 
     if (!lobby) {
       lobby = memoryStore.getLobbyByCode(cleanCode);
       if (lobby) {
-        existingGuesses = memoryStore.getGuesses(lobby.id);
+        const currentRoundNumber = Number(lobby.round_number) || 1;
+        const roundStartMs = lobby.updated_at ? new Date(lobby.updated_at).getTime() - 2500 : 0;
+        existingGuesses = memoryStore.getGuesses(lobby.id).filter((g: any) => {
+          if (typeof g.round_number === 'number' && g.round_number > 0) {
+            return g.round_number === currentRoundNumber;
+          }
+          if (g.created_at && roundStartMs > 0) {
+            return new Date(g.created_at).getTime() >= roundStartMs;
+          }
+          return true;
+        });
       }
     }
 
@@ -122,7 +144,15 @@ export async function POST(req: Request) {
     };
 
     if (supabase) {
-      await supabase.from('lobby_guesses').insert(newGuess);
+      const { error: insErr } = await supabase.from('lobby_guesses').insert({
+        ...newGuess,
+        round_number: Number(lobby.round_number) || 1
+      });
+
+      if (insErr) {
+        // If round_number column does not exist yet in DB, fall back to inserting without it
+        await supabase.from('lobby_guesses').insert(newGuess);
+      }
 
       if (lobbyFinished) {
         await supabase
@@ -130,8 +160,7 @@ export async function POST(req: Request) {
           .update({
             status: 'finished',
             winner_role: winnerRole,
-            winner_name: winnerName,
-            updated_at: new Date().toISOString()
+            winner_name: winnerName
           })
           .eq('id', lobby.id);
 
@@ -164,7 +193,6 @@ export async function POST(req: Request) {
       lobby.status = 'finished';
       lobby.winner_role = winnerRole;
       lobby.winner_name = winnerName;
-      lobby.updated_at = new Date().toISOString();
       memoryStore.saveLobby(lobby);
 
       // Memory H2H record if both are non-null

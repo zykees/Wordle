@@ -257,6 +257,16 @@ export default function WordlePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   });
 
+  const guessesRef = useRef(guesses);
+  useEffect(() => {
+    guessesRef.current = guesses;
+  }, [guesses]);
+
+  const isGameOverRef = useRef(isGameOver);
+  useEffect(() => {
+    isGameOverRef.current = isGameOver;
+  }, [isGameOver]);
+
   // Multiplayer Room State Sync & Fast Realtime Polling
   useEffect(() => {
     if (mode !== 'multiplayer' || !lobby) return;
@@ -272,9 +282,13 @@ export default function WordlePage() {
         if (!isSubscribed) return;
 
         if (data.lobby) {
-          // Check if round number changed (Rematch triggered!)
-          if (data.lobby.round_number !== currentRoundRef.current) {
-            currentRoundRef.current = data.lobby.round_number;
+          const lobbyRound = Number(data.lobby.round_number) || 1;
+          const isRoundChanged = lobbyRound !== currentRoundRef.current;
+          const isRematchActive = data.lobby.status === 'in_progress' && (isGameOverRef.current || isRoundChanged);
+
+          // Check if round number changed or rematch triggered
+          if (isRoundChanged || isRematchActive) {
+            currentRoundRef.current = lobbyRound;
             setLobby(data.lobby);
             setGuesses([]);
             setCurrentGuess('');
@@ -285,24 +299,11 @@ export default function WordlePage() {
             setWinnerName(null);
             setIsGameOverModalOpen(false);
             setTargetWord(data.lobby.target_word);
-            showToast(`Round ${data.lobby.round_number} Started!`);
+            showToast(`Round ${lobbyRound} Started!`);
             return;
           }
 
-          // If rematch set status back to in_progress while local is marked finished
-          if (data.lobby.status === 'in_progress' && isGameOver) {
-            setLobby(data.lobby);
-            setGuesses([]);
-            setCurrentGuess('');
-            setOpponentGuesses([]);
-            setIsGameOver(false);
-            setIsWinner(false);
-            setIsDraw(false);
-            setWinnerName(null);
-            setIsGameOverModalOpen(false);
-          } else {
-            setLobby(data.lobby);
-          }
+          setLobby(data.lobby);
 
           if (data.lobby.status === 'finished') {
             setIsGameOver(true);
@@ -326,9 +327,9 @@ export default function WordlePage() {
           const oppList = (data.guesses as LobbyGuess[]).filter((g) => g.player_role === opponentRole);
           setOpponentGuesses(oppList);
 
-          // If local guesses is empty and remote has guesses (e.g. reload), restore them
+          // If local guesses is empty and remote has guesses (e.g. reload mid-round), restore them
           const myGuesses = (data.guesses as LobbyGuess[]).filter((g) => g.player_role === playerRole);
-          if (myGuesses.length > 0 && guesses.length === 0 && !isGameOver) {
+          if (myGuesses.length > 0 && guessesRef.current.length === 0 && !isGameOverRef.current) {
             setGuesses(
               myGuesses.map((g) => ({
                 word: g.guess_word,
@@ -358,7 +359,23 @@ export default function WordlePage() {
         .on('broadcast', { event: 'guess_made' }, () => {
           fetchLobbyUpdate();
         })
-        .on('broadcast', { event: 'rematch_started' }, () => {
+        .on('broadcast', { event: 'rematch_started' }, (payload: any) => {
+          const nextRound = Number(payload?.payload?.round);
+          if (nextRound) {
+            currentRoundRef.current = nextRound;
+          }
+          // Instant local wipe on broadcast
+          setGuesses([]);
+          setCurrentGuess('');
+          setOpponentGuesses([]);
+          setIsGameOver(false);
+          setIsWinner(false);
+          setIsDraw(false);
+          setWinnerName(null);
+          setIsGameOverModalOpen(false);
+          if (nextRound) {
+            showToast(`Round ${nextRound} Started!`);
+          }
           fetchLobbyUpdate();
         })
         .on(
@@ -388,7 +405,7 @@ export default function WordlePage() {
         realtimeChannelRef.current = null;
       }
     };
-  }, [mode, lobby?.id, lobby?.code, playerRole, guesses.length, isGameOver, showToast]);
+  }, [mode, lobby?.id, lobby?.code, playerRole, showToast]);
 
   // Handle Rematch in Multiplayer
   const handleRematch = async () => {
@@ -404,17 +421,19 @@ export default function WordlePage() {
         body: JSON.stringify({ code: lobby.code }),
       });
       const data = await res.json();
-      if (res.ok && data.success) {
+      if (res.ok && data.success && data.lobby) {
+        const nextRound = Number(data.lobby.round_number) || (currentRoundRef.current + 1);
+
         // Send instant broadcast to opponent
         if (realtimeChannelRef.current) {
           realtimeChannelRef.current.send({
             type: 'broadcast',
             event: 'rematch_started',
-            payload: { round: data.lobby.round_number },
+            payload: { round: nextRound },
           });
         }
 
-        currentRoundRef.current = data.lobby.round_number;
+        currentRoundRef.current = nextRound;
         setLobby(data.lobby);
         setGuesses([]);
         setCurrentGuess('');
@@ -425,7 +444,7 @@ export default function WordlePage() {
         setWinnerName(null);
         setIsGameOverModalOpen(false);
         setTargetWord(data.lobby.target_word);
-        showToast(`Round ${data.lobby.round_number} Started!`);
+        showToast(`Round ${nextRound} Started!`);
       }
     } catch {
       showToast('Failed to start rematch');
