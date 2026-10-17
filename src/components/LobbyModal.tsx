@@ -9,22 +9,31 @@ interface LobbyModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLobbyJoined: (lobby: Lobby, role: 'host' | 'guest') => void;
+  initialCode?: string;
 }
 
 export const LobbyModal: React.FC<LobbyModalProps> = ({
   isOpen,
   onClose,
   onLobbyJoined,
+  initialCode,
 }) => {
   const { user } = useAuth();
-  const [tab, setTab] = useState<'create' | 'join'>('create');
+  const [tab, setTab] = useState<'create' | 'join'>(initialCode ? 'join' : 'create');
   const [wordLength, setWordLength] = useState<number>(5);
   const [maxAttempts, setMaxAttempts] = useState<number>(6);
-  const [joinCode, setJoinCode] = useState('');
+  const [joinCode, setJoinCode] = useState(initialCode || '');
   const [createdLobby, setCreatedLobby] = useState<Lobby | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  React.useEffect(() => {
+    if (initialCode) {
+      setTab('join');
+      setJoinCode(initialCode.toUpperCase());
+    }
+  }, [initialCode]);
 
   if (!isOpen) return null;
 

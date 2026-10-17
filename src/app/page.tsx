@@ -42,6 +42,7 @@ export default function WordlePage() {
 
   // Modals
   const [isLobbyModalOpen, setIsLobbyModalOpen] = useState<boolean>(false);
+  const [lobbyModalInitialCode, setLobbyModalInitialCode] = useState<string>('');
   const [isH2HModalOpen, setIsH2HModalOpen] = useState<boolean>(false);
   const [isGameOverModalOpen, setIsGameOverModalOpen] = useState<boolean>(false);
 
@@ -77,16 +78,107 @@ export default function WordlePage() {
     }
   }, [mode, wordLength, maxAttempts, targetWord, startNewSoloGame]);
 
-  // URL Invite Code auto-detection: check if ?room=CODE
-  useEffect(() => {
+  // Handle joining/creating a room and syncing code to URL
+  const handleLobbyJoined = useCallback((joinedLobby: Lobby, role: 'host' | 'guest') => {
+    setMode('multiplayer');
+    setLobby(joinedLobby);
+    setPlayerRole(role);
+    currentRoundRef.current = joinedLobby.round_number || 1;
+    setWordLength(joinedLobby.word_length);
+    setMaxAttempts(joinedLobby.max_attempts);
+    setGuesses([]);
+    setCurrentGuess('');
+    setOpponentGuesses([]);
+    setIsGameOver(false);
+    setIsWinner(false);
+    setIsDraw(false);
+    setWinnerName(null);
+    setIsGameOverModalOpen(false);
+
+    // Sync room code to URL bar (?room=CODE) so players can refresh, share, or reconnect
     if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const roomCode = urlParams.get('room');
-      if (roomCode) {
-        setIsLobbyModalOpen(true);
+      const url = new URL(window.location.href);
+      url.searchParams.set('room', joinedLobby.code);
+      window.history.replaceState({}, '', url.toString());
+
+      try {
+        localStorage.setItem(`wordle_room_${joinedLobby.code.toUpperCase()}`, JSON.stringify({
+          role,
+          code: joinedLobby.code.toUpperCase(),
+        }));
+        localStorage.setItem('wordle_last_room', joinedLobby.code.toUpperCase());
+      } catch {
+        // ignore storage errors
       }
     }
   }, []);
+
+  // URL Invite Code auto-detection and reconnect: check if ?room=CODE
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomCode = urlParams.get('room')?.toUpperCase().trim();
+    if (!roomCode) return;
+
+    setLobbyModalInitialCode(roomCode);
+
+    const autoReconnect = async () => {
+      try {
+        const res = await fetch(`/api/lobby/${roomCode}`);
+        if (!res.ok) {
+          setIsLobbyModalOpen(true);
+          return;
+        }
+
+        const data = await res.json();
+        if (!data.lobby) {
+          setIsLobbyModalOpen(true);
+          return;
+        }
+
+        const currentLobby: Lobby = data.lobby;
+
+        // Check if user was already in this room as host or guest
+        let savedRole: 'host' | 'guest' | null = null;
+        try {
+          const savedStr = localStorage.getItem(`wordle_room_${roomCode}`);
+          if (savedStr) {
+            const saved = JSON.parse(savedStr);
+            if (saved.role === 'host' || saved.role === 'guest') {
+              savedRole = saved.role;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        if (!savedRole) {
+          if (currentLobby.host_id && user.id && currentLobby.host_id === user.id) {
+            savedRole = 'host';
+          } else if (currentLobby.guest_id && user.id && currentLobby.guest_id === user.id) {
+            savedRole = 'guest';
+          } else if (currentLobby.host_name === user.name) {
+            savedRole = 'host';
+          } else if (currentLobby.guest_name === user.name) {
+            savedRole = 'guest';
+          }
+        }
+
+        if (savedRole) {
+          handleLobbyJoined(currentLobby, savedRole);
+          showToast(`Reconnected to room ${roomCode}!`);
+        } else {
+          setIsLobbyModalOpen(true);
+        }
+      } catch (err) {
+        console.warn('Auto reconnect error:', err);
+        setIsLobbyModalOpen(true);
+      }
+    };
+
+    autoReconnect();
+  }, [user.id, user.name, handleLobbyJoined, showToast]);
 
   // Handle Solo Guess Submit
   const handleSoloSubmit = async () => {
@@ -465,34 +557,33 @@ export default function WordlePage() {
     startNewSoloGame(wordLength, att);
   };
 
-  const handleLobbyJoined = (joinedLobby: Lobby, role: 'host' | 'guest') => {
-    setMode('multiplayer');
-    setLobby(joinedLobby);
-    setPlayerRole(role);
-    currentRoundRef.current = joinedLobby.round_number || 1;
-    setWordLength(joinedLobby.word_length);
-    setMaxAttempts(joinedLobby.max_attempts);
-    setGuesses([]);
-    setCurrentGuess('');
-    setOpponentGuesses([]);
-    setIsGameOver(false);
-    setIsWinner(false);
-    setIsDraw(false);
-    setWinnerName(null);
-    setIsGameOverModalOpen(false);
-  };
-
   const handleSwitchToSolo = () => {
     setMode('solo');
     setLobby(null);
+
+    // Remove ?room=CODE from browser URL bar when switching back to solo
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.history.replaceState({}, '', url.toString());
+
+      try {
+        localStorage.removeItem('wordle_last_room');
+      } catch {
+        // ignore
+      }
+    }
+
     startNewSoloGame(wordLength, maxAttempts);
   };
 
   const copyRoomCode = () => {
     if (!lobby) return;
-    navigator.clipboard.writeText(lobby.code);
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const inviteUrl = `${origin}?room=${lobby.code}`;
+    navigator.clipboard.writeText(inviteUrl);
     setCodeCopied(true);
-    showToast(`Room code ${lobby.code} copied!`);
+    showToast(`Invite link copied! (${lobby.code})`);
     setTimeout(() => setCodeCopied(false), 2000);
   };
 
@@ -632,6 +723,7 @@ export default function WordlePage() {
         isOpen={isLobbyModalOpen}
         onClose={() => setIsLobbyModalOpen(false)}
         onLobbyJoined={handleLobbyJoined}
+        initialCode={lobbyModalInitialCode}
       />
 
       <H2HModal
