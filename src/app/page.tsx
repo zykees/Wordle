@@ -10,7 +10,7 @@ import { H2HModal } from '@/components/H2HModal';
 import { GameOverModal } from '@/components/GameOverModal';
 import { useAuth } from '@/context/AuthContext';
 import { evaluateGuess, getKeyStates, soundManager, EvaluatedRow, TileState } from '@/lib/game/engine';
-import { getRandomWord, isValidWord } from '@/lib/words/words';
+import { getRandomWord, isValidWord, isValidWordAsync } from '@/lib/words/words';
 import { Lobby, LobbyGuess } from '@/lib/supabase/types';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { Copy, Check, Play, RefreshCw, AlertCircle } from 'lucide-react';
@@ -89,7 +89,7 @@ export default function WordlePage() {
   }, []);
 
   // Handle Solo Guess Submit
-  const handleSoloSubmit = () => {
+  const handleSoloSubmit = async () => {
     if (currentGuess.length !== wordLength) {
       soundManager.playShake();
       setIsShaking(true);
@@ -98,7 +98,8 @@ export default function WordlePage() {
       return;
     }
 
-    if (!isValidWord(currentGuess, wordLength)) {
+    const isValid = await isValidWordAsync(currentGuess, wordLength);
+    if (!isValid) {
       soundManager.playShake();
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);
@@ -140,7 +141,8 @@ export default function WordlePage() {
       return;
     }
 
-    if (!isValidWord(currentGuess, lobby.word_length)) {
+    const isValid = await isValidWordAsync(currentGuess, lobby.word_length);
+    if (!isValid) {
       soundManager.playShake();
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);
@@ -211,12 +213,12 @@ export default function WordlePage() {
     }
   };
 
-  const handleEnter = () => {
+  const handleEnter = async () => {
     if (isGameOver) return;
     if (mode === 'solo') {
-      handleSoloSubmit();
+      await handleSoloSubmit();
     } else {
-      handleMultiplayerSubmit();
+      await handleMultiplayerSubmit();
     }
   };
 

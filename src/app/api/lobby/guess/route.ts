@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { memoryStore } from '@/lib/memoryStore';
 import { evaluateGuess } from '@/lib/game/engine';
+import { isServerValidWord } from '@/lib/words/serverDictionary';
 import { isValidWord } from '@/lib/words/words';
 import { LobbyGuess } from '@/lib/supabase/types';
 
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Word must be ${lobby.word_length} letters` }, { status: 400 });
     }
 
-    if (!isValidWord(cleanGuess, lobby.word_length)) {
+    if (!isServerValidWord(cleanGuess, lobby.word_length) && !isValidWord(cleanGuess, lobby.word_length)) {
       return NextResponse.json({ error: 'Not in word list' }, { status: 400 });
     }
 
